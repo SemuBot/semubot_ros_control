@@ -161,15 +161,8 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_deactivate(
 hardware_interface::return_type SemubotHardwareInterface::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // Spin node to process incoming messages
-  rclcpp::spin_some(node_);
-  auto now = node_->get_clock()->now();
-  if ((now - last_msg_time_).seconds() > 1.0) {
-      // No data for 1 second — return OK but keep last values
-      // Don't error out — let micro-ROS reconnect
-      return hardware_interface::return_type::OK;
-  }
-  return hardware_interface::return_type::OK;
+    rclcpp::spin_some(node_);
+    return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type SemubotHardwareInterface::write(
