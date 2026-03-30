@@ -85,11 +85,6 @@ install(
 )
 
 install(
-  DIRECTORY config launch urdf
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(
   FILES semubot_hardware_interface_plugin.xml semubot_velocity_controller_plugin.xml
   DESTINATION share/${PROJECT_NAME}
 )
