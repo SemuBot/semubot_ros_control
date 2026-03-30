@@ -1,0 +1,241 @@
+#include "semubot_velocity_controller.hpp"
+#include <algorithm>
+#include <cmath>
+#include <string>
+
+namespace semubot_velocity_controller
+{
+
+SemubotVelocityController::SemubotVelocityController()
+: controller_interface::ControllerInterface()
+{
+}
+
+controller_interface::CallbackReturn SemubotVelocityController::on_init()
+{
+  try
+  {
+    // Declare parameters
+    auto_declare<double>("wheel_radius", 0.05);
+    auto_declare<double>("base_radius", 0.15);
+    auto_declare<std::vector<std::string>>("wheel_names", std::vector<std::string>());
+    auto_declare<double>("max_linear_velocity", 1.0);
+    auto_declare<double>("max_angular_velocity", 2.0);
+  }
+  catch (const std::exception & e)
+  {
+    RCLCPP_ERROR(
+      get_node()->get_logger(),
+      "Exception thrown during init: %s", e.what());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::InterfaceConfiguration
+SemubotVelocityController::command_interface_configuration() const
+{
+  controller_interface::InterfaceConfiguration config;
+  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+
+  for (const auto & wheel_name : wheel_names_)
+  {
+    config.names.push_back(wheel_name + "/velocity");
+  }
+
+  return config;
+}
+
+controller_interface::InterfaceConfiguration
+SemubotVelocityController::state_interface_configuration() const
+{
+  controller_interface::InterfaceConfiguration config;
+  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+
+  for (const auto & wheel_name : wheel_names_)
+  {
+    config.names.push_back(wheel_name + "/position");
+    config.names.push_back(wheel_name + "/velocity");
+  }
+
+  return config;
+}
+
+controller_interface::CallbackReturn SemubotVelocityController::on_configure(
+  const rclcpp_lifecycle::State & /*previous_state*/)
+{
+  // Get parameters
+  wheel_radius_ = get_node()->get_parameter("wheel_radius").as_double();
+  base_radius_ = get_node()->get_parameter("base_radius").as_double();
+  wheel_names_ = get_node()->get_parameter("wheel_names").as_string_array();
+  max_linear_velocity_ = get_node()->get_parameter("max_linear_velocity").as_double();
+  max_angular_velocity_ = get_node()->get_parameter("max_angular_velocity").as_double();
+
+  if (wheel_names_.size() != 3)
+  {
+    RCLCPP_ERROR(
+      get_node()->get_logger(),
+      "Expected 3 wheels, got %zu", wheel_names_.size());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  // Initialize wheel angles (30°, 150°, 270°)
+  wheel_angles_ = {M_PI / 6.0, 5.0 * M_PI / 6.0, 3.0 * M_PI / 2.0};
+
+  // Create subscriber for cmd_vel
+  cmd_vel_sub_ = get_node()->create_subscription<geometry_msgs::msg::Twist>(
+    "~/cmd_vel", rclcpp::SystemDefaultsQoS(),
+    [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
+      latest_cmd_vel_ = *msg;
+      cmd_vel_timeout_ = std::chrono::steady_clock::now();
+    });
+
+  // Create publisher for odometry
+  odom_pub_ = get_node()->create_publisher<nav_msgs::msg::Odometry>(
+    "~/odom", rclcpp::SystemDefaultsQoS());
+
+  RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller configured");
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::CallbackReturn SemubotVelocityController::on_activate(
+  const rclcpp_lifecycle::State & /*previous_state*/)
+{
+  // Clear command
+  latest_cmd_vel_ = geometry_msgs::msg::Twist();
+  cmd_vel_timeout_ = std::chrono::steady_clock::now();
+
+  RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller activated");
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::CallbackReturn SemubotVelocityController::on_deactivate(
+  const rclcpp_lifecycle::State & /*previous_state*/)
+{
+  // Stop all wheels
+  for (auto & command_interface : command_interfaces_)
+  {
+    [[maybe_unused]] bool success = command_interface.set_value(0.0);
+  }
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::return_type SemubotVelocityController::update(
+  const rclcpp::Time & time, const rclcpp::Duration & /*period*/)
+{
+  // Check for cmd_vel timeout (500ms)
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    now - cmd_vel_timeout_).count();
+
+  geometry_msgs::msg::Twist cmd_vel;
+  
+  if (elapsed > 500)
+  {
+    // Timeout - stop robot
+    cmd_vel.linear.x = 0.0;
+    cmd_vel.linear.y = 0.0;
+    cmd_vel.angular.z = 0.0;
+  }
+  else
+  {
+    cmd_vel = latest_cmd_vel_;
+    
+    // Clamp velocities
+    cmd_vel.linear.x = std::clamp(
+      cmd_vel.linear.x, -max_linear_velocity_, max_linear_velocity_);
+    cmd_vel.linear.y = std::clamp(
+      cmd_vel.linear.y, -max_linear_velocity_, max_linear_velocity_);
+    cmd_vel.angular.z = std::clamp(
+      cmd_vel.angular.z, -max_angular_velocity_, max_angular_velocity_);
+  }
+
+  // v_i = -sin(θ_i)*vx + cos(θ_i)*vy + L*ω
+  
+  std::vector<double> wheel_velocities(3);
+  for (size_t i = 0; i < 3; i++)
+  {
+    wheel_velocities[i] = 
+      -std::sin(wheel_angles_[i]) * cmd_vel.linear.x +
+       std::cos(wheel_angles_[i]) * cmd_vel.linear.y +
+       base_radius_ * cmd_vel.angular.z;
+  }
+
+  // Set wheel velocity commands
+  for (size_t i = 0; i < command_interfaces_.size(); i++)
+  {
+    [[maybe_unused]] bool success = command_interfaces_[i].set_value(wheel_velocities[i]);
+  }
+
+  publish_odometry(time);
+
+  return controller_interface::return_type::OK;
+}
+
+void SemubotVelocityController::publish_odometry(const rclcpp::Time & time)
+{
+  // Read actual wheel velocities from state interfaces
+  std::vector<double> actual_velocities(3);
+  for (size_t i = 0; i < 3; i++)
+  {
+    auto opt_value = state_interfaces_[i * 2 + 1].get_optional();
+    actual_velocities[i] = opt_value.has_value() ? opt_value.value() : 0.0;
+  }
+
+  Eigen::Matrix3d K;
+  for (size_t i = 0; i < 3; i++)
+  {
+    K(i, 0) = -std::sin(wheel_angles_[i]);
+    K(i, 1) =  std::cos(wheel_angles_[i]);
+    K(i, 2) =  base_radius_;
+  }
+
+  Eigen::Vector3d wheel_vel(actual_velocities[0], actual_velocities[1], actual_velocities[2]);
+  Eigen::Vector3d robot_vel = K.colPivHouseholderQr().solve(wheel_vel);
+
+  static double x = 0.0, y = 0.0, theta = 0.0;
+  static rclcpp::Time last_time = time;
+  
+  double dt = (time - last_time).seconds();
+  if (dt > 0.0 && dt < 1.0)  // Sanity check
+  {
+    x += robot_vel(0) * dt;
+    y += robot_vel(1) * dt;
+    theta += robot_vel(2) * dt;
+  }
+  last_time = time;
+
+  // Publish odometry
+  auto odom_msg = nav_msgs::msg::Odometry();
+  odom_msg.header.stamp = time;
+  odom_msg.header.frame_id = "odom";
+  odom_msg.child_frame_id = "base_link";
+
+  odom_msg.pose.pose.position.x = x;
+  odom_msg.pose.pose.position.y = y;
+  odom_msg.pose.pose.position.z = 0.0;
+
+  // Convert theta to quaternion
+  tf2::Quaternion q;
+  q.setRPY(0, 0, theta);
+  odom_msg.pose.pose.orientation.x = q.x();
+  odom_msg.pose.pose.orientation.y = q.y();
+  odom_msg.pose.pose.orientation.z = q.z();
+  odom_msg.pose.pose.orientation.w = q.w();
+
+  odom_msg.twist.twist.linear.x = robot_vel(0);
+  odom_msg.twist.twist.linear.y = robot_vel(1);
+  odom_msg.twist.twist.angular.z = robot_vel(2);
+
+  odom_pub_->publish(odom_msg);
+}
+
+}  // namespace semubot_velocity_controller
+
+#include "pluginlib/class_list_macros.hpp"
+PLUGINLIB_EXPORT_CLASS(
+  semubot_velocity_controller::SemubotVelocityController,
+  controller_interface::ControllerInterface)

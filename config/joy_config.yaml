@@ -1,0 +1,17 @@
+teleop_twist_joy_node:
+  ros__parameters:
+    axis_linear:
+      x: 1
+      y: 0
+    axis_angular:
+      yaw: 3
+    scale_linear:
+      x: 0.6
+      y: 0.6      # Max strafe speed (0.0 - 1.0)
+    scale_linear_turbo:
+      x: 0.6
+      y: 0.6
+    scale_angular:
+      yaw: 0.6    # Max rotation speed
+    enable_button: 5       # Hold RB/R1 to enable movement
+    enable_turbo_button: -1  

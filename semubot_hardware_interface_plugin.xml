@@ -1,0 +1,9 @@
+<library path="semubot_hardware_interface">
+  <class name="semubot_hardware_interface/SemubotHardwareInterface"
+         type="semubot_hardware_interface::SemubotHardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Semubot hardware interface
+    </description>
+  </class>
+</library>

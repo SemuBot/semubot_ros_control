@@ -1,0 +1,9 @@
+<library path="semubot_velocity_controller">
+  <class name="semubot_velocity_controller/SemubotVelocityController"
+         type="semubot_velocity_controller::SemubotVelocityController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Semubot velocity controller
+    </description>
+  </class>
+</library>
