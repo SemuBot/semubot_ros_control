@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
 
 #include "controller_interface/controller_interface.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -44,6 +45,19 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
+
+  struct PidState {
+    double integral   = 0.0;
+    double prev_error = 0.0;
+  };
+
+  static constexpr double KP             = 0.5;
+  static constexpr double KI             = 0.2;
+  static constexpr double KD             = 0.01;
+  static constexpr double INTEGRAL_LIMIT = 5.0;
+  static constexpr double MAX_WHEEL_RADS = 20.0;  
+
+  std::array<PidState, 3> pid_states_;
   // Parameters
   double wheel_radius_;
   double base_radius_;

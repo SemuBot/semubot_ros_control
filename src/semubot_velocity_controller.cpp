@@ -124,54 +124,76 @@ controller_interface::CallbackReturn SemubotVelocityController::on_deactivate(
 }
 
 controller_interface::return_type SemubotVelocityController::update(
-  const rclcpp::Time & time, const rclcpp::Duration & /*period*/)
+  const rclcpp::Time & time, const rclcpp::Duration & period)
 {
-  // Check for cmd_vel timeout (500ms)
+  // --- Timeout check ---
   auto now = std::chrono::steady_clock::now();
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
     now - cmd_vel_timeout_).count();
 
   geometry_msgs::msg::Twist cmd_vel;
-  
-  if (elapsed > 500)
-  {
-    // Timeout - stop robot
+  if (elapsed > 500) {
     cmd_vel.linear.x = 0.0;
     cmd_vel.linear.y = 0.0;
     cmd_vel.angular.z = 0.0;
-  }
-  else
-  {
+  } else {
     cmd_vel = latest_cmd_vel_;
-    
-    // Clamp velocities
-    cmd_vel.linear.x = std::clamp(
-      cmd_vel.linear.x, -max_linear_velocity_, max_linear_velocity_);
-    cmd_vel.linear.y = std::clamp(
-      cmd_vel.linear.y, -max_linear_velocity_, max_linear_velocity_);
-    cmd_vel.angular.z = std::clamp(
-      cmd_vel.angular.z, -max_angular_velocity_, max_angular_velocity_);
+    cmd_vel.linear.x = std::clamp(cmd_vel.linear.x, -max_linear_velocity_, max_linear_velocity_);
+    cmd_vel.linear.y = std::clamp(cmd_vel.linear.y, -max_linear_velocity_, max_linear_velocity_);
+    cmd_vel.angular.z = std::clamp(cmd_vel.angular.z, -max_angular_velocity_, max_angular_velocity_);
   }
 
-  // v_i = -sin(θ_i)*vx + cos(θ_i)*vy + L*ω
-  
-  std::vector<double> wheel_velocities(3);
-  for (size_t i = 0; i < 3; i++)
-  {
-    wheel_velocities[i] = 
+  // --- Inverse kinematics: cmd_vel → target wheel velocities (rad/s) ---
+  std::array<double, 3> target_wheel_vel;
+  for (size_t i = 0; i < 3; i++) {
+    target_wheel_vel[i] =
       -std::sin(wheel_angles_[i]) * cmd_vel.linear.x +
        std::cos(wheel_angles_[i]) * cmd_vel.linear.y +
        base_radius_ * cmd_vel.angular.z;
+
+    // Convert from robot surface speed (m/s) to wheel angular velocity (rad/s)
+    target_wheel_vel[i] /= wheel_radius_;
   }
 
-  // Set wheel velocity commands
-  for (size_t i = 0; i < command_interfaces_.size(); i++)
-  {
-    [[maybe_unused]] bool success = command_interfaces_[i].set_value(wheel_velocities[i]);
+  // state_interfaces_ layout: [pos0, vel0, pos1, vel1, pos2, vel2]
+  std::array<double, 3> actual_wheel_vel;
+  for (size_t i = 0; i < 3; i++) {
+    auto opt = state_interfaces_[i * 2 + 1].get_optional();
+    actual_wheel_vel[i] = opt.has_value() ? opt.value() : 0.0;
+  }
+
+  // --- PID ---
+  double dt = period.seconds();
+  if (dt <= 0.0 || dt > 1.0) dt = 0.01;  // guard against bad period on first tick
+
+  std::array<double, 3> output;
+  for (size_t i = 0; i < 3; i++) {
+    double error = target_wheel_vel[i] - actual_wheel_vel[i];
+
+    // Integral with anti-windup
+    pid_states_[i].integral += error * dt;
+    pid_states_[i].integral = std::clamp(pid_states_[i].integral, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
+
+    // Derivative
+    double derivative = (error - pid_states_[i].prev_error) / dt;
+    pid_states_[i].prev_error = error;
+
+    output[i] = KP * error + KI * pid_states_[i].integral + KD * derivative;
+  }
+
+  // Reset integral when stopped
+  if (elapsed > 500) {
+    for (auto & s : pid_states_) {
+      s.integral   = 0.0;
+      s.prev_error = 0.0;
+    }
+  }
+
+  for (size_t i = 0; i < command_interfaces_.size(); i++) {
+    command_interfaces_[i].set_value(output[i]);
   }
 
   publish_odometry(time);
-
   return controller_interface::return_type::OK;
 }
 
