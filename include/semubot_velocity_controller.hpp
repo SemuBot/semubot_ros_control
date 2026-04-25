@@ -51,9 +51,12 @@ private:
     double prev_error = 0.0;
   };
 
-  static constexpr double KP             = 0.5;
-  static constexpr double KI             = 0.2;
-  static constexpr double KD             = 0.01;
+  //static constexpr double KP             = 0.5;
+  //static constexpr double KI             = 0.2;
+  //static constexpr double KD             = 0.01;
+  double kp_;
+  double ki_;
+  double kd_;
   static constexpr double INTEGRAL_LIMIT = 5.0;
   static constexpr double MAX_WHEEL_RADS = 20.0;  
 

@@ -21,6 +21,9 @@ controller_interface::CallbackReturn SemubotVelocityController::on_init()
     auto_declare<std::vector<std::string>>("wheel_names", std::vector<std::string>());
     auto_declare<double>("max_linear_velocity", 1.0);
     auto_declare<double>("max_angular_velocity", 2.0);
+    auto_declare<double>("kp", 0.1);
+    auto_declare<double>("ki", 0.0);
+    auto_declare<double>("kd", 0.0);
   }
   catch (const std::exception & e)
   {
@@ -71,7 +74,10 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
   wheel_names_ = get_node()->get_parameter("wheel_names").as_string_array();
   max_linear_velocity_ = get_node()->get_parameter("max_linear_velocity").as_double();
   max_angular_velocity_ = get_node()->get_parameter("max_angular_velocity").as_double();
-
+  kp_ = get_node()->get_parameter("kp").as_double();
+  ki_ = get_node()->get_parameter("ki").as_double();
+  kd_ = get_node()->get_parameter("kd").as_double();
+  
   if (wheel_names_.size() != 3)
   {
     RCLCPP_ERROR(
@@ -106,6 +112,15 @@ controller_interface::CallbackReturn SemubotVelocityController::on_activate(
   // Clear command
   latest_cmd_vel_ = geometry_msgs::msg::Twist();
   cmd_vel_timeout_ = std::chrono::steady_clock::now();
+
+  for (auto & s : pid_states_) {
+    s.integral = 0.0;
+    s.prev_error = 0.0;
+  }
+
+  for (auto & command_interface : command_interfaces_) {
+    command_interface.set_value(0.0);
+  }
 
   RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller activated");
   return controller_interface::CallbackReturn::SUCCESS;
