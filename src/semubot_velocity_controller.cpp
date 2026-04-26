@@ -77,7 +77,7 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
   kp_ = get_node()->get_parameter("kp").as_double();
   ki_ = get_node()->get_parameter("ki").as_double();
   kd_ = get_node()->get_parameter("kd").as_double();
-  
+
   if (wheel_names_.size() != 3)
   {
     RCLCPP_ERROR(
@@ -87,7 +87,10 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
   }
 
   // Initialize wheel angles (30°, 150°, 270°)
-  wheel_angles_ = {M_PI / 6.0, 5.0 * M_PI / 6.0, 3.0 * M_PI / 2.0};
+  wheel_angles_ = {
+    M_PI / 2.0,  // Motor 3 front
+    4.0 * M_PI / 3.0,  // Motor 1 rear-left
+    11.0 * M_PI / 6.0}; // Motor 2 rear-right
 
   // Create subscriber for cmd_vel
   cmd_vel_sub_ = get_node()->create_subscription<geometry_msgs::msg::Twist>(
@@ -121,7 +124,10 @@ controller_interface::CallbackReturn SemubotVelocityController::on_activate(
   for (auto & command_interface : command_interfaces_) {
     command_interface.set_value(0.0);
   }
-
+for (size_t i = 0; i < command_interfaces_.size(); i++) {
+    RCLCPP_INFO(get_node()->get_logger(), 
+        "command_interface[%zu] = %s", i, command_interfaces_[i].get_name().c_str());
+}
   RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller activated");
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -158,6 +164,11 @@ controller_interface::return_type SemubotVelocityController::update(
     cmd_vel.angular.z = std::clamp(cmd_vel.angular.z, -max_angular_velocity_, max_angular_velocity_);
   }
 
+  bool stopped =
+  std::abs(cmd_vel.linear.x) < 1e-6 &&
+  std::abs(cmd_vel.linear.y) < 1e-6 &&
+  std::abs(cmd_vel.angular.z) < 1e-6;
+
   // --- Inverse kinematics: cmd_vel → target wheel velocities (rad/s) ---
   std::array<double, 3> target_wheel_vel;
   for (size_t i = 0; i < 3; i++) {
@@ -183,19 +194,49 @@ controller_interface::return_type SemubotVelocityController::update(
 
   std::array<double, 3> output;
   for (size_t i = 0; i < 3; i++) {
+
+
+    if (stopped) {
+      output[i] = 0.0;
+      pid_states_[i].integral = 0.0;
+      pid_states_[i].prev_error = 0.0;
+      continue;
+    }
     double error = target_wheel_vel[i] - actual_wheel_vel[i];
 
     // Integral with anti-windup
-    pid_states_[i].integral += error * dt;
-    pid_states_[i].integral = std::clamp(pid_states_[i].integral, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
+    //pid_states_[i].integral += error * dt;
+    //pid_states_[i].integral = std::clamp(pid_states_[i].integral, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
 
     // Derivative
-    double derivative = (error - pid_states_[i].prev_error) / dt;
-    pid_states_[i].prev_error = error;
+    //double derivative = (error - pid_states_[i].prev_error) / dt;
+    //pid_states_[i].prev_error = error;
 
-    output[i] = KP * error + KI * pid_states_[i].integral + KD * derivative;
+    //output[i] = kp_ * error + ki_ * pid_states_[i].integral + kd_ * derivative;
+    //output[i] = std::clamp(output[i], -0.30, 0.30);
+    //output[i] = std::clamp(target_wheel_vel[i] * 0.05, -0.30, 0.30);
+    
+    
+    double ff = target_wheel_vel[i] * 0.05;
+    double pid = kp_ * error;
+
+    output[i] = ff + pid;
+    output[i] = std::clamp(output[i], -0.30, 0.30);
+    const double MIN_PWM = 0.30;
+
+    if (std::abs(output[i]) > 1e-6 && std::abs(output[i]) < MIN_PWM) {
+      output[i] = std::copysign(MIN_PWM, output[i]);
+    }
+
   }
-
+    RCLCPP_INFO_THROTTLE(
+      get_node()->get_logger(),
+      *get_node()->get_clock(),
+      500,
+      "target: %.2f %.2f %.2f | actual: %.2f %.2f %.2f | output: %.2f %.2f %.2f",
+      target_wheel_vel[0], target_wheel_vel[1], target_wheel_vel[2],
+      actual_wheel_vel[0], actual_wheel_vel[1], actual_wheel_vel[2],
+      output[0], output[1], output[2]);
   // Reset integral when stopped
   if (elapsed > 500) {
     for (auto & s : pid_states_) {

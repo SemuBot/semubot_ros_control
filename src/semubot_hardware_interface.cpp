@@ -172,10 +172,19 @@ hardware_interface::return_type SemubotHardwareInterface::write(
   auto msg = std_msgs::msg::Float32MultiArray();
   msg.data.resize(3);
   
-  for (size_t i = 0; i < hw_commands_.size(); i++)
-  {
-    msg.data[i] = static_cast<float>(hw_commands_[i]);
-  }
+  auto get_cmd = [&](const std::string & name) -> float {
+    for (size_t i = 0; i < info_.joints.size(); i++) {
+      if (info_.joints[i].name == name) {
+        return static_cast<float>(hw_commands_[i]);
+      }
+    }
+    return 0.0f;
+  };
+
+  // STM32: [motor3, motor1, motor2]
+  msg.data[0] = get_cmd("omni_ball_3_joint");
+  msg.data[1] = get_cmd("omni_ball_1_joint");
+  msg.data[2] = get_cmd("omni_ball_2_joint");
 
   velocity_cmd_pub_->publish(msg);
 
@@ -203,6 +212,19 @@ void SemubotHardwareInterface::motor_state_callback(
       
       if (index < msg->effort.size())
         hw_efforts_[i] = msg->effort[index];
+            RCLCPP_INFO_THROTTLE(
+        rclcpp::get_logger("SemubotHardwareInterface"),
+        *node_->get_clock(), 1000,
+        "joint[%zu] %s → msg index %zu → vel %.3f",
+        i, info_.joints[i].name.c_str(), index, hw_velocities_[i]);
+    }
+        else
+    {
+      RCLCPP_WARN_THROTTLE(
+        rclcpp::get_logger("SemubotHardwareInterface"),
+        *node_->get_clock(), 1000,
+        "joint[%zu] %s NOT FOUND in motor_states msg: msg names: %s %s %s",
+        i, info_.joints[i].name.c_str(), msg->name[0].c_str(), msg->name[1].c_str(), msg->name[2].c_str());
     }
   }
 }
