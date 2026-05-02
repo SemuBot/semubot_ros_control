@@ -181,10 +181,9 @@ hardware_interface::return_type SemubotHardwareInterface::write(
     return 0.0f;
   };
 
-  // STM32: [motor3, motor1, motor2]
-  msg.data[0] = get_cmd("omni_ball_3_joint");
-  msg.data[1] = get_cmd("omni_ball_1_joint");
-  msg.data[2] = get_cmd("omni_ball_2_joint");
+  msg.data[0] = get_cmd("omni_ball_1_joint");
+  msg.data[1] = get_cmd("omni_ball_2_joint");
+  msg.data[2] = get_cmd("omni_ball_3_joint");
 
   velocity_cmd_pub_->publish(msg);
 

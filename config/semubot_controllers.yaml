@@ -11,9 +11,9 @@ omni_velocity_controller:
     wheel_radius: 0.05
     base_radius: 0.15
     wheel_names:
-      - omni_ball_3_joint #assuming that the motor 3 is at the front
-      - omni_ball_1_joint
+      - omni_ball_1_joint 
       - omni_ball_2_joint
+      - omni_ball_3_joint
     max_linear_velocity: 1.0
     max_angular_velocity: 2.0
 
