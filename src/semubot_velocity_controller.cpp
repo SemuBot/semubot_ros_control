@@ -1,7 +1,10 @@
 #include "semubot_velocity_controller.hpp"
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace semubot_velocity_controller
 {
@@ -20,9 +23,16 @@ controller_interface::CallbackReturn SemubotVelocityController::on_init()
     auto_declare<std::vector<std::string>>("wheel_names", std::vector<std::string>());
     auto_declare<double>("max_linear_velocity", 1.0);
     auto_declare<double>("max_angular_velocity", 2.0);
-    auto_declare<double>("kp", 0.1);
+    auto_declare<double>("kp", 0.005);
     auto_declare<double>("ki", 0.0);
     auto_declare<double>("kd", 0.0);
+    auto_declare<double>("max_duty", 0.80);
+
+    // Integral safety clamp.
+    auto_declare<double>("integral_limit", 5.0);
+
+    // If no cmd_vel arrives for this long, stop.
+    auto_declare<double>("cmd_timeout_sec", 0.5);
   }
   catch (const std::exception & e)
   {
@@ -72,9 +82,14 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
   wheel_names_ = get_node()->get_parameter("wheel_names").as_string_array();
   max_linear_velocity_ = get_node()->get_parameter("max_linear_velocity").as_double();
   max_angular_velocity_ = get_node()->get_parameter("max_angular_velocity").as_double();
+
   kp_ = get_node()->get_parameter("kp").as_double();
   ki_ = get_node()->get_parameter("ki").as_double();
   kd_ = get_node()->get_parameter("kd").as_double();
+
+  max_duty_ = get_node()->get_parameter("max_duty").as_double();
+  integral_limit_ = get_node()->get_parameter("integral_limit").as_double();
+  cmd_timeout_sec_ = get_node()->get_parameter("cmd_timeout_sec").as_double();
 
   if (wheel_names_.size() != 3)
   {
@@ -84,8 +99,37 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // Only used for odometry right now.
-  // Command control below uses manual calibrated mixing.
+  if (wheel_radius_ <= 0.0)
+  {
+    RCLCPP_ERROR(get_node()->get_logger(), "wheel_radius must be > 0");
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  if (max_duty_ <= 0.0)
+  {
+    RCLCPP_ERROR(get_node()->get_logger(), "max_duty must be > 0");
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  /*
+    Wheel angle convention.
+
+      wheel_angles_[0] = M1 = omni_ball_1_joint
+      wheel_angles_[1] = M2 = omni_ball_2_joint
+      wheel_angles_[2] = M3 = omni_ball_3_joint
+
+    Kinematic equation used:
+
+      wheel_velocity[i] =
+        (-sin(theta_i) * vx + cos(theta_i) * vy + base_radius * wz) / wheel_radius
+
+    Units:
+      vx, vy: m/s
+      wz: rad/s
+      wheel_radius: m
+      base_radius: m
+      wheel_velocity: rad/s
+  */
   wheel_angles_ = {
     M_PI / 2.0,
     4.0 * M_PI / 3.0,
@@ -106,6 +150,10 @@ controller_interface::CallbackReturn SemubotVelocityController::on_configure(
     rclcpp::SystemDefaultsQoS());
 
   RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller configured");
+  RCLCPP_INFO(
+    get_node()->get_logger(),
+    "PID gains: kp=%.6f ki=%.6f kd=%.6f max_duty=%.3f",
+    kp_, ki_, kd_, max_duty_);
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -124,11 +172,22 @@ controller_interface::CallbackReturn SemubotVelocityController::on_activate(
 
   for (size_t i = 0; i < command_interfaces_.size(); i++)
   {
+    command_interfaces_[i].set_value(0.0);
+
     RCLCPP_INFO(
       get_node()->get_logger(),
       "command_interface[%zu] = %s",
       i,
       command_interfaces_[i].get_name().c_str());
+  }
+
+  for (size_t i = 0; i < state_interfaces_.size(); i++)
+  {
+    RCLCPP_INFO(
+      get_node()->get_logger(),
+      "state_interface[%zu] = %s",
+      i,
+      state_interfaces_[i].get_name().c_str());
   }
 
   RCLCPP_INFO(get_node()->get_logger(), "Semubot velocity controller activated");
@@ -151,20 +210,27 @@ controller_interface::CallbackReturn SemubotVelocityController::on_deactivate(
     }
   }
 
+  for (auto & s : pid_states_)
+  {
+    s.integral = 0.0;
+    s.prev_error = 0.0;
+  }
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::return_type SemubotVelocityController::update(
   const rclcpp::Time & time,
-  const rclcpp::Duration & /*period*/)
+  const rclcpp::Duration & period)
 {
   auto now = std::chrono::steady_clock::now();
-  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    now - cmd_vel_timeout_).count();
+
+  const double elapsed_sec =
+    std::chrono::duration<double>(now - cmd_vel_timeout_).count();
 
   geometry_msgs::msg::Twist cmd_vel;
 
-  if (elapsed > 500)
+  if (elapsed_sec > cmd_timeout_sec_)
   {
     cmd_vel.linear.x = 0.0;
     cmd_vel.linear.y = 0.0;
@@ -195,58 +261,126 @@ controller_interface::return_type SemubotVelocityController::update(
     std::abs(cmd_vel.linear.y) < 1e-6 &&
     std::abs(cmd_vel.angular.z) < 1e-6;
 
-  std::array<double, 3> output = {0.0, 0.0, 0.0};
+  const double dt = std::max(period.seconds(), 1e-3);
+
+  std::array<double, 3> target_wheel_vel = {0.0, 0.0, 0.0};
+  std::array<double, 3> actual_wheel_vel = {0.0, 0.0, 0.0};
+  std::array<double, 3> feedforward_duty = {0.0, 0.0, 0.0};
+  std::array<double, 3> output_duty = {0.0, 0.0, 0.0};
+
+  for (size_t i = 0; i < 3; i++)
+  {
+    const size_t velocity_index = i * 2 + 1;
+
+    if (velocity_index < state_interfaces_.size())
+    {
+      auto opt_value = state_interfaces_[velocity_index].get_optional();
+      actual_wheel_vel[i] = opt_value.has_value() ? opt_value.value() : 0.0;
+    }
+    else
+    {
+      actual_wheel_vel[i] = 0.0;
+    }
+  }
 
   if (!stopped)
   {
+    // Forward / backward feedforward
     if (cmd_vel.linear.x >= 0.0) {
-      output[0] =  0.533 * cmd_vel.linear.x;  // M1
-      output[1] =  0.533 * cmd_vel.linear.x;  // M2
-      output[2] = -1.133 * cmd_vel.linear.x;  // M3
+      feedforward_duty[0] =  0.533 * cmd_vel.linear.x;
+      feedforward_duty[1] =  0.533 * cmd_vel.linear.x;
+      feedforward_duty[2] = -1.333 * cmd_vel.linear.x;
     } else {
-      // Backward = [-0.15, -0.15, 0.225] at x = -0.3
-      output[0] =  0.500 * cmd_vel.linear.x;  // M1
-      output[1] =  0.500 * cmd_vel.linear.x;  // M2
-      output[2] = -0.750 * cmd_vel.linear.x;  // M3
+      feedforward_duty[0] =  0.500 * cmd_vel.linear.x;
+      feedforward_duty[1] =  0.500 * cmd_vel.linear.x;
+      feedforward_duty[2] = -0.750 * cmd_vel.linear.x;
     }
 
-    // Right / left
+    // Left / right feedforward
     if (cmd_vel.linear.y >= 0.0) {
-      // Right
-      // [M1, M2, M3] = [0.20, -0.20, -0.10]
-      output[0] += -0.667 * cmd_vel.linear.y;  // M1
-      output[1] +=  0.667 * cmd_vel.linear.y;  // M2
-      output[2] +=  0.167 * cmd_vel.linear.y;  // M3
+      feedforward_duty[0] += -0.667 * cmd_vel.linear.y;
+      feedforward_duty[1] +=  0.667 * cmd_vel.linear.y;
+      feedforward_duty[2] +=  0.167 * cmd_vel.linear.y;
     } else {
-      // Left
-      // [M1, M2, M3] = [-0.20, 0.20, 0.05]
-      output[0] += -0.667 * cmd_vel.linear.y;  // M1
-      output[1] +=  0.667 * cmd_vel.linear.y;  // M2
-      output[2] +=  0.333 * cmd_vel.linear.y;  // M3
+      // right
+      feedforward_duty[0] += -0.667 * cmd_vel.linear.y;
+      feedforward_duty[1] +=  0.667 * cmd_vel.linear.y;
+      feedforward_duty[2] +=  0.333 * cmd_vel.linear.y;
     }
 
-    // Rotation.
-    output[0] += 0.50 * cmd_vel.angular.z;
-    output[1] += 0.50 * cmd_vel.angular.z;
-    output[2] += 0.50 * cmd_vel.angular.z;
+    // Rotation feedforward
+    feedforward_duty[0] += 0.50 * cmd_vel.angular.z;
+    feedforward_duty[1] += 0.50 * cmd_vel.angular.z;
+    feedforward_duty[2] += 0.50 * cmd_vel.angular.z;
 
+    for (size_t i = 0; i < 3; i++) {
+      feedforward_duty[i] = std::clamp(feedforward_duty[i], -max_duty_, max_duty_);
+    }
     for (size_t i = 0; i < 3; i++)
     {
-      output[i] = std::clamp(output[i], -0.40, 0.40);
+      target_wheel_vel[i] =
+        (
+          -std::sin(wheel_angles_[i]) * cmd_vel.linear.x +
+           std::cos(wheel_angles_[i]) * cmd_vel.linear.y +
+           base_radius_ * cmd_vel.angular.z
+        ) / wheel_radius_;
+    }
+
+    /*
+      PID:
+        error = target rad/s - measured rad/s
+        output = duty command
+    */
+    for (size_t i = 0; i < 3; i++)
+    {
+      const double error = target_wheel_vel[i] - actual_wheel_vel[i];
+
+      pid_states_[i].integral += error * dt;
+      pid_states_[i].integral = std::clamp(
+        pid_states_[i].integral,
+        -integral_limit_,
+        integral_limit_);
+
+      const double derivative =
+        (error - pid_states_[i].prev_error) / dt;
+
+      const double correction =
+        kp_ * error +
+        ki_ * pid_states_[i].integral +
+        kd_ * derivative;
+
+      output_duty[i] = feedforward_duty[i] + correction;
+      output_duty[i] = std::clamp(output_duty[i], -max_duty_, max_duty_);
+      pid_states_[i].prev_error = error;
+
     }
   }
-  if (elapsed > 500)
+  else
+  {
+
+    for (auto & s : pid_states_)
+    {
+      s.integral = 0.0;
+      s.prev_error = 0.0;
+    }
+
+    output_duty = {0.0, 0.0, 0.0};
+  }
+
+  if (elapsed_sec > cmd_timeout_sec_)
   {
     for (auto & s : pid_states_)
     {
       s.integral = 0.0;
       s.prev_error = 0.0;
     }
+
+    output_duty = {0.0, 0.0, 0.0};
   }
 
-  for (size_t i = 0; i < command_interfaces_.size(); i++)
+  for (size_t i = 0; i < command_interfaces_.size() && i < 3; i++)
   {
-    bool success = command_interfaces_[i].set_value(output[i]);
+    bool success = command_interfaces_[i].set_value(output_duty[i]);
 
     if (!success)
     {
@@ -259,25 +393,50 @@ controller_interface::return_type SemubotVelocityController::update(
     }
   }
 
+  RCLCPP_DEBUG_THROTTLE(
+    get_node()->get_logger(),
+    *get_node()->get_clock(),
+    500,
+    "cmd vx=%.3f vy=%.3f wz=%.3f | target=[%.2f %.2f %.2f] actual=[%.2f %.2f %.2f] duty=[%.3f %.3f %.3f]",
+    cmd_vel.linear.x,
+    cmd_vel.linear.y,
+    cmd_vel.angular.z,
+    target_wheel_vel[0],
+    target_wheel_vel[1],
+    target_wheel_vel[2],
+    actual_wheel_vel[0],
+    actual_wheel_vel[1],
+    actual_wheel_vel[2],
+    output_duty[0],
+    output_duty[1],
+    output_duty[2]);
+
   publish_odometry(time);
   return controller_interface::return_type::OK;
 }
 
 void SemubotVelocityController::publish_odometry(const rclcpp::Time & time)
 {
-  std::vector<double> actual_velocities(3);
+  std::vector<double> actual_velocities(3, 0.0);
+
   for (size_t i = 0; i < 3; i++)
   {
-    auto opt_value = state_interfaces_[i * 2 + 1].get_optional();
-    actual_velocities[i] = opt_value.has_value() ? opt_value.value() : 0.0;
+    const size_t velocity_index = i * 2 + 1;
+
+    if (velocity_index < state_interfaces_.size())
+    {
+      auto opt_value = state_interfaces_[velocity_index].get_optional();
+      actual_velocities[i] = opt_value.has_value() ? opt_value.value() : 0.0;
+    }
   }
 
   Eigen::Matrix3d K;
+
   for (size_t i = 0; i < 3; i++)
   {
-    K(i, 0) = -std::sin(wheel_angles_[i]);
-    K(i, 1) =  std::cos(wheel_angles_[i]);
-    K(i, 2) =  base_radius_;
+    K(i, 0) = -std::sin(wheel_angles_[i]) / wheel_radius_;
+    K(i, 1) =  std::cos(wheel_angles_[i]) / wheel_radius_;
+    K(i, 2) =  base_radius_ / wheel_radius_;
   }
 
   Eigen::Vector3d wheel_vel(
@@ -296,9 +455,16 @@ void SemubotVelocityController::publish_odometry(const rclcpp::Time & time)
 
   if (dt > 0.0 && dt < 1.0)
   {
-    x += robot_vel(0) * dt;
-    y += robot_vel(1) * dt;
-    theta += robot_vel(2) * dt;
+    const double vx = robot_vel(0);
+    const double vy = robot_vel(1);
+    const double wz = robot_vel(2);
+
+    const double cos_theta = std::cos(theta);
+    const double sin_theta = std::sin(theta);
+
+    x += (vx * cos_theta - vy * sin_theta) * dt;
+    y += (vx * sin_theta + vy * cos_theta) * dt;
+    theta += wz * dt;
   }
 
   last_time = time;
@@ -313,7 +479,7 @@ void SemubotVelocityController::publish_odometry(const rclcpp::Time & time)
   odom_msg.pose.pose.position.z = 0.0;
 
   tf2::Quaternion q;
-  q.setRPY(0, 0, theta);
+  q.setRPY(0.0, 0.0, theta);
 
   odom_msg.pose.pose.orientation.x = q.x();
   odom_msg.pose.pose.orientation.y = q.y();

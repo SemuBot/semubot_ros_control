@@ -1,25 +1,33 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
-    omni_velocity_controller:
+    update_rate: 20
+
+    semubot_velocity_controller:
       type: semubot_velocity_controller/SemubotVelocityController
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-omni_velocity_controller:
+semubot_velocity_controller:
   ros__parameters:
     wheel_radius: 0.05
     base_radius: 0.15
+
     wheel_names:
-      - omni_ball_1_joint 
+      - omni_ball_1_joint
       - omni_ball_2_joint
       - omni_ball_3_joint
+
     max_linear_velocity: 1.0
     max_angular_velocity: 2.0
 
     kp: 0.001
     ki: 0.0
     kd: 0.0
+
+    max_duty: 0.80
+    integral_limit: 5.0
+    cmd_timeout_sec: 0.5
 
 joint_state_broadcaster:
   ros__parameters:

@@ -57,8 +57,11 @@ private:
   double kp_;
   double ki_;
   double kd_;
-  static constexpr double INTEGRAL_LIMIT = 5.0;
-  static constexpr double MAX_WHEEL_RADS = 20.0;  
+
+  double max_duty_ = 0.80;
+  double integral_limit_ = 5.0;
+  double cmd_timeout_sec_ = 0.5;
+
 
   std::array<PidState, 3> pid_states_;
   // Parameters

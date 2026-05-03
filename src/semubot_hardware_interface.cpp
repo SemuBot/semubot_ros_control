@@ -211,11 +211,6 @@ void SemubotHardwareInterface::motor_state_callback(
       
       if (index < msg->effort.size())
         hw_efforts_[i] = msg->effort[index];
-            RCLCPP_INFO_THROTTLE(
-        rclcpp::get_logger("SemubotHardwareInterface"),
-        *node_->get_clock(), 1000,
-        "joint[%zu] %s → msg index %zu → vel %.3f",
-        i, info_.joints[i].name.c_str(), index, hw_velocities_[i]);
     }
         else
     {
