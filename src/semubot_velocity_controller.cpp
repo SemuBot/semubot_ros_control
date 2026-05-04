@@ -287,17 +287,41 @@ controller_interface::return_type SemubotVelocityController::update(
   {
     // Forward / backward feedforward
     if (cmd_vel.linear.x >= 0.0) {
-      feedforward_duty[0] =  0.533 * cmd_vel.linear.x;
-      feedforward_duty[1] =  0.533 * cmd_vel.linear.x;
-      feedforward_duty[2] = -1.333 * cmd_vel.linear.x;
+      const double vx = cmd_vel.linear.x;
+
+      const std::array<double, 3> low_coeff = {
+        0.533,
+        0.533,
+      -1.333
+      };
+
+      // Tuned at vx = 0.4:
+      // [0.28, 0.06, -0.52]
+      const std::array<double, 3> high_coeff = {
+        0.700,
+        0.150,
+      -1.300
+      };
+
+      // Blend:
+      // vx <= 0.20 uses low-speed tuning
+      // vx >= 0.40 uses high-speed tuning
+      double t = std::clamp((vx - 0.20) / 0.20, 0.0, 1.0);
+
+      for (size_t i = 0; i < 3; i++) {
+        const double coeff =
+          low_coeff[i] + (high_coeff[i] - low_coeff[i]) * t;
+
+        feedforward_duty[i] = coeff * vx;
+      }
     } else {
       feedforward_duty[0] =  0.500 * cmd_vel.linear.x;
       feedforward_duty[1] =  0.500 * cmd_vel.linear.x;
       feedforward_duty[2] = -0.750 * cmd_vel.linear.x;
     }
-
     // Left / right feedforward
     if (cmd_vel.linear.y >= 0.0) {
+      // left
       feedforward_duty[0] += -0.667 * cmd_vel.linear.y;
       feedforward_duty[1] +=  0.667 * cmd_vel.linear.y;
       feedforward_duty[2] +=  0.167 * cmd_vel.linear.y;
@@ -307,7 +331,6 @@ controller_interface::return_type SemubotVelocityController::update(
       feedforward_duty[1] +=  0.667 * cmd_vel.linear.y;
       feedforward_duty[2] +=  0.333 * cmd_vel.linear.y;
     }
-
     // Rotation feedforward
     feedforward_duty[0] += 0.50 * cmd_vel.angular.z;
     feedforward_duty[1] += 0.50 * cmd_vel.angular.z;

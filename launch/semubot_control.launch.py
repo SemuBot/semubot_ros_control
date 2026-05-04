@@ -45,8 +45,8 @@ def generate_launch_description():
         parameters=[robot_description, robot_controllers],
         output='both',
         remappings=[
-            ('/omni_velocity_controller/cmd_vel', '/cmd_vel'),
-            ('/omni_velocity_controller/odom', '/odom'),
+            ('/semubot_velocity_controller/cmd_vel', '/cmd_vel'),
+            ('/semubot_velocity_controller/odom', '/odom'),
             ('/diagnostics', '/controller_manager/diagnostics'),
         ]
     )
@@ -67,7 +67,7 @@ def generate_launch_description():
     omni_controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=['omni_velocity_controller', '--controller-manager', '/controller_manager'],
+        arguments=['semubot_velocity_controller', '--controller-manager', '/controller_manager'],
     )
 
     joy_node = Node(

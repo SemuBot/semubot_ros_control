@@ -18,15 +18,15 @@ semubot_velocity_controller:
       - omni_ball_2_joint
       - omni_ball_3_joint
 
-    max_linear_velocity: 1.0
+    max_linear_velocity: 0.6
     max_angular_velocity: 2.0
 
-    kp: 0.001
-    ki: 0.0
-    kd: 0.0
+    kp: 0.005
+    ki: 0.0005
+    kd: 0.00001
 
     max_duty: 0.80
-    integral_limit: 5.0
+    integral_limit: 1.0
     cmd_timeout_sec: 0.5
 
 joint_state_broadcaster:
