@@ -295,24 +295,44 @@ controller_interface::return_type SemubotVelocityController::update(
       -1.333
       };
 
-      // Tuned at vx = 0.4:
+      // Tuned at vx = 0.40:
       // [0.28, 0.06, -0.52]
-      const std::array<double, 3> high_coeff = {
+      const std::array<double, 3> mid_coeff = {
         0.700,
         0.150,
       -1.300
       };
 
-      // Blend:
-      // vx <= 0.20 uses low-speed tuning
-      // vx >= 0.40 uses high-speed tuning
-      double t = std::clamp((vx - 0.20) / 0.20, 0.0, 1.0);
+      // Tuned at vx = 0.60:
+      // [0.50, 0.00, -0.67]
+      const std::array<double, 3> high_coeff = {
+        0.733,
+        0.067,
+      -1.033
+      };
 
-      for (size_t i = 0; i < 3; i++) {
-        const double coeff =
-          low_coeff[i] + (high_coeff[i] - low_coeff[i]) * t;
+      if (vx <= 0.40) {
+        // vx <= 0.20 uses low-speed tuning
+        // vx >= 0.40 uses mid-speed tuning
+        const double t = std::clamp((vx - 0.20) / 0.20, 0.0, 1.0);
 
-        feedforward_duty[i] = coeff * vx;
+        for (size_t i = 0; i < 3; i++) {
+          const double coeff =
+            low_coeff[i] + (mid_coeff[i] - low_coeff[i]) * t;
+
+          feedforward_duty[i] = coeff * vx;
+        }
+      } else {
+        // vx >= 0.40 blends from mid-speed to high-speed tuning
+        // vx >= 0.60 uses high-speed tuning
+        const double t = std::clamp((vx - 0.40) / 0.20, 0.0, 1.0);
+
+        for (size_t i = 0; i < 3; i++) {
+          const double coeff =
+            mid_coeff[i] + (high_coeff[i] - mid_coeff[i]) * t;
+
+          feedforward_duty[i] = coeff * vx;
+        }
       }
     } else {
       feedforward_duty[0] =  0.500 * cmd_vel.linear.x;
