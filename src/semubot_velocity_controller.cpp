@@ -261,6 +261,8 @@ controller_interface::return_type SemubotVelocityController::update(
       cmd_vel.angular.z,
       -max_angular_velocity_,
       max_angular_velocity_);
+
+    cmd_vel.linear.x = -cmd_vel.linear.x;
   }
 
   const bool stopped =
