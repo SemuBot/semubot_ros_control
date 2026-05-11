@@ -15,6 +15,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
+#include "hardware_interface/hardware_component_interface.hpp"
+
 
 namespace semubot_hardware_interface
 {
@@ -24,7 +26,7 @@ public:
   RCLCPP_SHARED_PTR_DEFINITIONS(SemubotHardwareInterface)
 
   hardware_interface::CallbackReturn on_init(
-    const hardware_interface::HardwareInfo & info) override;
+    const hardware_interface::HardwareComponentInterfaceParams & params) override;
 
   hardware_interface::CallbackReturn on_configure(
     const rclcpp_lifecycle::State & previous_state) override;

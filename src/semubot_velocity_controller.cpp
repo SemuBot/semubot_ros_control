@@ -172,8 +172,15 @@ controller_interface::CallbackReturn SemubotVelocityController::on_activate(
 
   for (size_t i = 0; i < command_interfaces_.size(); i++)
   {
-    command_interfaces_[i].set_value(0.0);
+    bool success = command_interfaces_[i].set_value(0.0);
 
+    if (!success)
+    {
+      RCLCPP_WARN(
+        get_node()->get_logger(),
+        "Failed to zero command interface %zu during activation",
+        i);
+    }
     RCLCPP_INFO(
       get_node()->get_logger(),
       "command_interface[%zu] = %s",
