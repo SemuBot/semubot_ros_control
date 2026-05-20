@@ -383,7 +383,7 @@ controller_interface::return_type SemubotVelocityController::update(
         error = target rad/s - measured rad/s
         output = duty command
     */
-   /*
+   
     for (size_t i = 0; i < 3; i++)
     {
       const double error = target_wheel_vel[i] - actual_wheel_vel[i];
@@ -407,17 +407,6 @@ controller_interface::return_type SemubotVelocityController::update(
       pid_states_[i].prev_error = error;
 
     }
-      */
-     for (size_t i = 0; i < 3; i++)
-        {
-          output_duty[i] = std::clamp(
-            feedforward_duty[i],
-            -max_duty_,
-            max_duty_);
-
-          pid_states_[i].integral = 0.0;
-          pid_states_[i].prev_error = 0.0;
-        }
   }
   else
   {
