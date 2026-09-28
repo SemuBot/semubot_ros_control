@@ -38,9 +38,20 @@ target_include_directories(semubot_hardware_interface PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/omni_robot_control>
 )
-ament_target_dependencies(
-  semubot_hardware_interface PUBLIC
-  ${THIS_PACKAGE_INCLUDE_DEPENDS}
+
+target_link_libraries(semubot_hardware_interface PUBLIC
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  controller_interface::controller_interface
+  realtime_tools::realtime_tools
+  tf2::tf2
+  Eigen3::Eigen
+  ${sensor_msgs_TARGETS}
+  ${std_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
 )
 
 # Causes the visibility macros to use dllexport rather than dllimport,
@@ -61,9 +72,20 @@ target_include_directories(semubot_velocity_controller PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/omni_robot_control>
 )
-ament_target_dependencies(
-  semubot_velocity_controller PUBLIC
-  ${THIS_PACKAGE_INCLUDE_DEPENDS}
+
+target_link_libraries(semubot_velocity_controller PUBLIC
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  controller_interface::controller_interface
+  realtime_tools::realtime_tools
+  tf2::tf2
+  Eigen3::Eigen
+  ${sensor_msgs_TARGETS}
+  ${std_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
 )
 
 target_compile_definitions(semubot_velocity_controller PRIVATE "semubot_velocity_controller_BUILDING_DLL")

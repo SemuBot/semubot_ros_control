@@ -16,7 +16,7 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 #include "hardware_interface/hardware_component_interface.hpp"
-
+#include <rclcpp/executors/single_threaded_executor.hpp>
 
 namespace semubot_hardware_interface
 {
@@ -64,6 +64,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr motor_state_sub_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr velocity_cmd_pub_;
 
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   void motor_state_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
 };
 

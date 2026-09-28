@@ -9,8 +9,9 @@ namespace semubot_hardware_interface
 hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
   const hardware_interface::HardwareComponentInterfaceParams & params)
 {
-  if (hardware_interface::SystemInterface::on_init(params) !=
-      hardware_interface::CallbackReturn::SUCCESS)
+  if (
+    hardware_interface::SystemInterface::on_init(params) !=
+    hardware_interface::CallbackReturn::SUCCESS)
   {
     return hardware_interface::CallbackReturn::ERROR;
   }
@@ -18,33 +19,50 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
   // Get parameters
   wheel_radius_ = std::stod(info_.hardware_parameters["wheel_radius"]);
   base_radius_ = std::stod(info_.hardware_parameters["base_radius"]);
-  
-  // Initialize wheel angles (30°, 150°, 270°)
-  wheel_angles_ = {M_PI / 6.0, 5.0 * M_PI / 6.0, 3.0 * M_PI / 2.0};
 
-  hw_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_efforts_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_commands_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+  // Initialize wheel angles
+  wheel_angles_ = {
+    M_PI / 6.0,
+    5.0 * M_PI / 6.0,
+    3.0 * M_PI / 2.0
+  };
 
-  // Verify we have exactly 3 joints
+  hw_positions_.resize(
+    info_.joints.size(),
+    std::numeric_limits<double>::quiet_NaN());
+
+  hw_velocities_.resize(
+    info_.joints.size(),
+    std::numeric_limits<double>::quiet_NaN());
+
+  hw_efforts_.resize(
+    info_.joints.size(),
+    std::numeric_limits<double>::quiet_NaN());
+
+  hw_commands_.resize(
+    info_.joints.size(),
+    std::numeric_limits<double>::quiet_NaN());
+
   if (info_.joints.size() != 3)
   {
     RCLCPP_ERROR(
       rclcpp::get_logger("SemubotHardwareInterface"),
-      "Expected 3 joints, got %zu", info_.joints.size());
+      "Expected 3 joints, got %zu",
+      info_.joints.size());
+
     return hardware_interface::CallbackReturn::ERROR;
   }
 
   for (const hardware_interface::ComponentInfo & joint : info_.joints)
   {
-    // Check for required state interfaces
     if (joint.state_interfaces.size() != 3)
     {
       RCLCPP_ERROR(
         rclcpp::get_logger("SemubotHardwareInterface"),
-        "Joint '%s' has %zu state interfaces. Expected 3 (position, velocity, effort).",
-        joint.name.c_str(), joint.state_interfaces.size());
+        "Joint '%s' has %zu state interfaces. Expected 3.",
+        joint.name.c_str(),
+        joint.state_interfaces.size());
+
       return hardware_interface::CallbackReturn::ERROR;
     }
 
@@ -52,19 +70,39 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
     {
       RCLCPP_ERROR(
         rclcpp::get_logger("SemubotHardwareInterface"),
-        "Joint '%s' has %zu command interfaces. Expected 1 (velocity).",
-        joint.name.c_str(), joint.command_interfaces.size());
+        "Joint '%s' has %zu command interfaces. Expected 1.",
+        joint.name.c_str(),
+        joint.command_interfaces.size());
+
       return hardware_interface::CallbackReturn::ERROR;
     }
   }
 
+  // Create internal ROS node
+  node_ = rclcpp::Node::make_shared(
+    "semubot_hardware_interface_node");
+
+  // Add it to ros2_control's existing executor
+  if (auto executor = params.executor.lock())
+  {
+    executor->add_node(node_);
+  }
+  else
+  {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("SemubotHardwareInterface"),
+      "Failed to access controller manager executor");
+
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
   RCLCPP_INFO(
     rclcpp::get_logger("SemubotHardwareInterface"),
-    "Successfully initialized SemubotHardwareInterface with %zu joints", info_.joints.size());
+    "Successfully initialized SemubotHardwareInterface with %zu joints",
+    info_.joints.size());
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
-
 hardware_interface::CallbackReturn SemubotHardwareInterface::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
@@ -78,7 +116,6 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_configure(
     hw_commands_[i] = 0.0;
   }
 
-  node_ = rclcpp::Node::make_shared("semubot_hardware_interface_node");
 
   // Subscribe to motor states from STM32
   motor_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
@@ -161,7 +198,6 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_deactivate(
 hardware_interface::return_type SemubotHardwareInterface::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-    rclcpp::spin_some(node_);
     return hardware_interface::return_type::OK;
 }
 
