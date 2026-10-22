@@ -90,6 +90,11 @@ install(
 )
 
 install(
+  PROGRAMS scripts/motor_fault_diagnostics.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
   DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/
 )

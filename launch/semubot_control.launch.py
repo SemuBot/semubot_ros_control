@@ -70,6 +70,12 @@ def generate_launch_description():
         arguments=['semubot_velocity_controller', '--controller-manager', '/controller_manager'],
     )
 
+    motor_fault_diagnostics_node = Node(
+        package='semubot_ros_control',
+        executable='motor_fault_diagnostics.py',
+        output='screen'
+    )
+
     joy_node = Node(
         package='joy',
         executable='joy_node',
@@ -97,6 +103,7 @@ def generate_launch_description():
         robot_state_pub_node,
         joint_state_broadcaster_spawner,
         delay_omni_controller_after_joint_state,
+        motor_fault_diagnostics_node,
         joy_node,
         teleop_node,
     ])
