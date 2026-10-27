@@ -10,22 +10,41 @@ controller_manager:
 
 semubot_velocity_controller:
   ros__parameters:
-    wheel_radius: 0.05
-    base_radius: 0.15
+    # Radii from semubot_v2.urdf.xacro; tune them until /odom matches a measured
+    # drive and turn (not done yet).
+    wheel_radius: 0.062
+    base_radius: 0.213
 
     wheel_names:
       - omni_ball_1_joint
       - omni_ball_2_joint
       - omni_ball_3_joint
 
+    # Per wheel, in wheel_names order. See on_configure in
+    # semubot_velocity_controller.cpp for the convention.
+    # Found by driving the robot (2026-10-27): wheel 1 front-left, wheel 2
+    # rear-left, wheel 3 right. The V2 URDF still has them elsewhere.
+    wheel_angles_deg: [30.0, 150.0, 270.0]
+    drive_offsets_deg: [0.0, 0.0, 0.0]   # 180 flips a wheel that drives backwards
+
     max_linear_velocity: 0.4
     max_angular_velocity: 0.4
 
-    kp: 0.00
+    # Feedforward per wheel: duty = kv * wheel rad/s + ks * sign
+    # From lifted step tests on motors 1 and 3 (motor 2 assumed the same).
+    kv: [0.044, 0.044, 0.044]
+    ks: [0.025, 0.025, 0.025]
+
+    # Speed correction on top of the feedforward. kp >= 0.02 overshot on the
+    # stand; ki not tuned yet.
+    kp: 0.01
     ki: 0.000
     kd: 0.0000
 
-    max_duty: 0.60
+    # Reverse draws ~1.8x the current of forward (motor Hall timing), and
+    # -0.3/-0.4 steps tripped VDS overcurrent. Keep at 0.3 until that's solved.
+    max_duty: 0.30
+    max_duty_rate: 1.0   # duty per second: 0 -> 0.3 in 0.3 s
     integral_limit: 1.0
     cmd_timeout_sec: 0.5
 

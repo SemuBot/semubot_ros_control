@@ -59,6 +59,8 @@ private:
   double kd_;
 
   double max_duty_ = 0.80;
+  double max_duty_rate_ = 1.0;           // duty per second
+  std::array<double, 3> prev_duty_{};    // last duty sent, for the ramp
   double integral_limit_ = 5.0;
   double cmd_timeout_sec_ = 0.5;
 
@@ -68,8 +70,16 @@ private:
   double wheel_radius_;
   double base_radius_;
   std::vector<std::string> wheel_names_;
-  std::vector<double> wheel_angles_;
+  std::array<double, 3> kv_;
+  std::array<double, 3> ks_;
   double max_linear_velocity_;
+
+  // Kinematics: wheel rad/s = K_ * (vx, vy, wz); K_inv_ for odometry
+  Eigen::Matrix3d K_;
+  Eigen::Matrix3d K_inv_;
+
+  // Index of each wheel's velocity state interface, looked up by name
+  std::array<size_t, 3> vel_state_idx_;
   double max_angular_velocity_;
 
   // Subscribers and publishers

@@ -15,16 +15,8 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // Get parameters
-  wheel_radius_ = std::stod(info_.hardware_parameters["wheel_radius"]);
-  base_radius_ = std::stod(info_.hardware_parameters["base_radius"]);
-  
-  // Initialize wheel angles (30°, 150°, 270°)
-  wheel_angles_ = {M_PI / 6.0, 5.0 * M_PI / 6.0, 3.0 * M_PI / 2.0};
-
   hw_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
   hw_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_efforts_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
   hw_commands_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
 
   // Verify we have exactly 3 joints
@@ -39,11 +31,11 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
   for (const hardware_interface::ComponentInfo & joint : info_.joints)
   {
     // Check for required state interfaces
-    if (joint.state_interfaces.size() != 3)
+    if (joint.state_interfaces.size() != 2)
     {
       RCLCPP_ERROR(
         rclcpp::get_logger("SemubotHardwareInterface"),
-        "Joint '%s' has %zu state interfaces. Expected 3 (position, velocity, effort).",
+        "Joint '%s' has %zu state interfaces. Expected 2 (position, velocity).",
         joint.name.c_str(), joint.state_interfaces.size());
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -52,7 +44,7 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_init(
     {
       RCLCPP_ERROR(
         rclcpp::get_logger("SemubotHardwareInterface"),
-        "Joint '%s' has %zu command interfaces. Expected 1 (velocity).",
+        "Joint '%s' has %zu command interfaces. Expected 1 (velocity, carrying duty).",
         joint.name.c_str(), joint.command_interfaces.size());
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -74,15 +66,14 @@ hardware_interface::CallbackReturn SemubotHardwareInterface::on_configure(
   {
     hw_positions_[i] = 0.0;
     hw_velocities_[i] = 0.0;
-    hw_efforts_[i] = 0.0;
     hw_commands_[i] = 0.0;
   }
 
   node_ = rclcpp::Node::make_shared("semubot_hardware_interface_node");
 
-  // Subscribe to motor states from STM32
+  // Subscribe to motor states from STM32 (best effort, matching the firmware publisher)
   motor_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-    "/motor_states", 50,
+    "/motor_states", rclcpp::SensorDataQoS(),
     std::bind(&SemubotHardwareInterface::motor_state_callback, this, std::placeholders::_1));
 
   // Publisher for velocity commands to STM32
@@ -106,9 +97,6 @@ SemubotHardwareInterface::export_state_interfaces()
     state_interfaces.emplace_back(
       hardware_interface::StateInterface(
         info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &hw_velocities_[i]));
-    state_interfaces.emplace_back(
-      hardware_interface::StateInterface(
-        info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_efforts_[i]));
   }
 
   return state_interfaces;
@@ -208,9 +196,6 @@ void SemubotHardwareInterface::motor_state_callback(
       
       if (index < msg->velocity.size())
         hw_velocities_[i] = msg->velocity[index];
-      
-      if (index < msg->effort.size())
-        hw_efforts_[i] = msg->effort[index];
     }
         else
     {

@@ -48,16 +48,10 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
-  // Robot parameters
-  double wheel_radius_;
-  double base_radius_;
-  std::vector<double> wheel_angles_;
-
   // Hardware state
   std::vector<double> hw_positions_;
   std::vector<double> hw_velocities_;
-  std::vector<double> hw_efforts_;
-  std::vector<double> hw_commands_;
+  std::vector<double> hw_commands_;  // duty, -1..1, sent to the STM32 as-is
   rclcpp::Time last_msg_time_;
   // ROS communication
   rclcpp::Node::SharedPtr node_;
