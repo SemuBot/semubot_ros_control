@@ -103,6 +103,10 @@ install(
   DESTINATION share/${PROJECT_NAME}/
 )
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_motor_fault_diagnostics test/test_motor_fault_diagnostics.py)
+endif()
 
 ## EXPORTS
 ament_export_targets(export_omni_robot_control HAS_LIBRARY_TARGET)
