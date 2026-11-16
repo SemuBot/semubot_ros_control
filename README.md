@@ -52,7 +52,8 @@ Encoder feedback flows in the opposite direction:
 STM32 encoders
     │
     ▼
-/motor_states  (std_msgs/Float32MultiArray)
+/motor_states  (sensor_msgs/JointState)
+    │  position rad, velocity rad/s, effort = DRV8353 FAULT_STATUS_1 per motor
     │
     ▼
 SemuBotHardwareInterface
@@ -74,13 +75,14 @@ SemuBotVelocityController
 | Topic | Type | Description |
 |---|---|---|
 | `/cmd_vel` | `geometry_msgs/Twist` | High-level velocity command |
-| `/motor_states` | `std_msgs/Float32MultiArray` | Per-motor encoder feedback from STM32 |
+| `/motor_states` | `sensor_msgs/JointState` | Per-motor encoder feedback from STM32: position (rad), velocity (rad/s); `effort` carries the DRV8353 `FAULT_STATUS_1` register of each driver |
 
 ### Published
 
 | Topic | Type | Description |
 |---|---|---|
 | `/hardware_interface/velocity_cmd` | `std_msgs/Float32MultiArray` | Low-level motor commands `[M1, M2, M3]` |
+| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | Motor driver faults decoded from `/motor_states` effort (`motor_fault_diagnostics.py`) |
 
 ### `/cmd_vel` field mapping
 
